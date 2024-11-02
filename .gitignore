@@ -1,0 +1,5 @@
+build*
+hci-usb-to-uart.jdebug
+hci-usb-to-uart.jdebug.user
+cmake-build-*
+.idea
