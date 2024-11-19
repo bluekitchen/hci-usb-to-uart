@@ -59,8 +59,8 @@ void free_hid_buf(uint8_t daddr);
 int main(void)
 {
 
-    stdio_init_all();
     board_init();
+    stdio_init_all();
 
     printf("TinyUSB Bare API Example\r\n");
 
@@ -175,37 +175,41 @@ void parse_config_descriptor(uint8_t dev_addr, tusb_desc_configuration_t const* 
     uint8_t const* desc_end = ((uint8_t const*) desc_cfg) + tu_le16toh(desc_cfg->wTotalLength);
     uint8_t const* p_desc   = tu_desc_next(desc_cfg);
 
+    printf("  Configuration Descriptor:\n");
+    printf("  - bNumInterfaces: %u\n", desc_cfg->bNumInterfaces);
+
+    uint16_t temp_buf[128];
+
     // parse each interfaces
-    while( p_desc < desc_end )
-    {
-        uint8_t assoc_itf_count = 1;
-
-        // Class will always starts with Interface Association (if any) and then Interface descriptor
-        if ( TUSB_DESC_INTERFACE_ASSOCIATION == tu_desc_type(p_desc) )
-        {
-            tusb_desc_interface_assoc_t const * desc_iad = (tusb_desc_interface_assoc_t const *) p_desc;
-            assoc_itf_count = desc_iad->bInterfaceCount;
-
-            p_desc = tu_desc_next(p_desc); // next to Interface
+    while( p_desc < desc_end ){
+        uint8_t descriptor_type = tu_desc_type(p_desc);
+        uint8_t descriptor_len  = tu_desc_len(p_desc);
+        switch (descriptor_type){
+            case TUSB_DESC_INTERFACE:
+                tusb_desc_interface_t const * interface_descriptor = (tusb_desc_interface_t const *) p_desc;
+                printf("  - Interface Descriptor:\n");
+                printf("    - bInterfaceNumber %u\n",    interface_descriptor->bInterfaceNumber);
+                printf("    - bNumEndpoints %u\n",       interface_descriptor->bNumEndpoints);
+                printf("    - iInterface       %u     ", interface_descriptor->iInterface);
+                if ((interface_descriptor->iInterface != 0 ) &&
+                    (XFER_RESULT_SUCCESS == tuh_descriptor_get_string_sync(dev_addr, interface_descriptor->iInterface, LANGUAGE_ID, temp_buf, sizeof(temp_buf)))){
+                    print_utf16(temp_buf, TU_ARRAY_SIZE(temp_buf));
+                }
+                printf("\r\n");
+                break;
+            case TUSB_DESC_ENDPOINT:
+                tusb_desc_endpoint_t const * endpoint_descriptor = (tusb_desc_endpoint_t const *) p_desc;
+                printf("    - Endpoint  Descriptor:\n");
+                printf("       - bEndpointAddress %02x\n", endpoint_descriptor->bEndpointAddress);
+                printf("       - bmAttributes xfer %u\n", endpoint_descriptor->bmAttributes.xfer);
+                printf("       - bmAttributes sync %u\n", endpoint_descriptor->bmAttributes.sync);
+                printf("       - wMaxPacketSize %u\n", tu_le16toh(endpoint_descriptor->wMaxPacketSize));
+                break;
+            default:
+                printf("  - type %u, len %u\n", descriptor_type, descriptor_len);
+                break;
         }
-
-        // must be interface from now
-        if( TUSB_DESC_INTERFACE != tu_desc_type(p_desc) ) return;
-        tusb_desc_interface_t const* desc_itf = (tusb_desc_interface_t const*) p_desc;
-
-        uint16_t const drv_len = count_interface_total_len(desc_itf, assoc_itf_count, (uint16_t) (desc_end-p_desc));
-
-        // probably corrupted descriptor
-        if(drv_len < sizeof(tusb_desc_interface_t)) return;
-
-        // only open and listen to HID endpoint IN
-        if (desc_itf->bInterfaceClass == TUSB_CLASS_HID)
-        {
-            open_hid_interface(dev_addr, desc_itf, drv_len);
-        }
-
-        // next Interface or IAD descriptor
-        p_desc += drv_len;
+        p_desc += descriptor_len;
     }
 }
 
