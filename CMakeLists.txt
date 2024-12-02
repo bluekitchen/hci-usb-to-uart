@@ -9,6 +9,10 @@ project(${PROJECT} C CXX)
 pico_sdk_init()
 add_executable(${PROJECT})
 
+target_compile_definitions(${PROJECT} PRIVATE
+    SEGGER_RTT_MODE_DEFAULT=SEGGER_RTT_MODE_BLOCK_IF_FIFO_FULL
+)
+
 target_sources(${PROJECT} PUBLIC ${CMAKE_CURRENT_LIST_DIR}/src/main.c)
 
 target_include_directories(${PROJECT} PRIVATE src)
