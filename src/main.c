@@ -51,6 +51,7 @@ void led_blinking_task(void);
 static void print_utf16(uint16_t *temp_buf, size_t buf_len);
 void print_device_descriptor(tuh_xfer_t* xfer);
 void parse_config_descriptor(uint8_t dev_addr, tusb_desc_configuration_t const* desc_cfg);
+void find_bluetooth_endpoints(uint8_t dev_addr, tusb_desc_configuration_t const* desc_cfg);
 
 uint8_t* get_hid_buf(uint8_t daddr);
 void free_hid_buf(uint8_t daddr);
@@ -156,7 +157,11 @@ void print_device_descriptor(tuh_xfer_t* xfer)
     // Get configuration descriptor with sync API
     if (XFER_RESULT_SUCCESS == tuh_descriptor_get_configuration_sync(daddr, 0, temp_buf, sizeof(temp_buf)))
     {
+        // Dump Configuration
         parse_config_descriptor(daddr, (tusb_desc_configuration_t*) temp_buf);
+
+        // now, find our endpoints
+        find_bluetooth_endpoints(daddr, (tusb_desc_configuration_t*) temp_buf);
     }
 }
 
@@ -164,10 +169,6 @@ void print_device_descriptor(tuh_xfer_t* xfer)
 // Configuration Descriptor
 //--------------------------------------------------------------------+
 
-// count total length of an interface
-uint16_t count_interface_total_len(tusb_desc_interface_t const* desc_itf, uint8_t itf_count, uint16_t max_len);
-
-void open_hid_interface(uint8_t daddr, tusb_desc_interface_t const *desc_itf, uint16_t max_len);
 
 // simple configuration parser to open and listen to HID Endpoint IN
 void parse_config_descriptor(uint8_t dev_addr, tusb_desc_configuration_t const* desc_cfg)
@@ -213,34 +214,50 @@ void parse_config_descriptor(uint8_t dev_addr, tusb_desc_configuration_t const* 
     }
 }
 
-uint16_t count_interface_total_len(tusb_desc_interface_t const* desc_itf, uint8_t itf_count, uint16_t max_len)
-{
-    uint8_t const* p_desc = (uint8_t const*) desc_itf;
-    uint16_t len = 0;
 
-    while (itf_count--)
-    {
-        // Next on interface desc
-        len += tu_desc_len(desc_itf);
-        p_desc = tu_desc_next(p_desc);
+void find_bluetooth_endpoints(uint8_t dev_addr, tusb_desc_configuration_t const* desc_cfg) {
+    printf("\nBTstack: find Bluetooth Endpoints\n");
 
-        while (len < max_len)
-        {
-            // return on IAD regardless of itf count
-            if ( tu_desc_type(p_desc) == TUSB_DESC_INTERFACE_ASSOCIATION ) return len;
+    uint8_t iInterface;
 
-            if ( (tu_desc_type(p_desc) == TUSB_DESC_INTERFACE) &&
-                 ((tusb_desc_interface_t const*) p_desc)->bAlternateSetting == 0 )
-            {
+    uint8_t const* desc_end = ((uint8_t const*) desc_cfg) + tu_le16toh(desc_cfg->wTotalLength);
+    uint8_t const* p_desc   = tu_desc_next(desc_cfg);
+
+    // parse each interfaces
+    while( p_desc < desc_end ){
+        uint8_t descriptor_type = tu_desc_type(p_desc);
+        uint8_t descriptor_len  = tu_desc_len(p_desc);
+        switch (descriptor_type){
+            case TUSB_DESC_INTERFACE:
+                tusb_desc_interface_t const * interface_descriptor = (tusb_desc_interface_t const *) p_desc;
+                iInterface = interface_descriptor->iInterface;
                 break;
-            }
+            case TUSB_DESC_ENDPOINT:
+                tusb_desc_endpoint_t const * endpoint_descriptor = (tusb_desc_endpoint_t const *) p_desc;
+                printf("Interface %u, Endpoint Address 0x%02x, attributes.xfer 0x%02x\n",
+                    iInterface, endpoint_descriptor->bEndpointAddress, endpoint_descriptor->bmAttributes.xfer);
 
-            len += tu_desc_len(p_desc);
-            p_desc = tu_desc_next(p_desc);
+                // type interrupt, direction incoming
+                if  (((endpoint_descriptor->bEndpointAddress & TUSB_DIR_IN_MASK) == TUSB_DIR_IN_MASK)
+                    && (endpoint_descriptor->bmAttributes.xfer == TUSB_XFER_INTERRUPT)){
+                    puts("-> HCI Event");
+                }
+                // type bulk, direction incoming
+                if  (((endpoint_descriptor->bEndpointAddress & TUSB_DIR_IN_MASK) == TUSB_DIR_IN_MASK)
+                    && (endpoint_descriptor->bmAttributes.xfer == TUSB_XFER_BULK)){
+                    puts("-> HCI ACL IN");
+                }
+                // type bulk, direction outgoing
+                if  (((endpoint_descriptor->bEndpointAddress & TUSB_DIR_IN_MASK) == 0)
+                    && (endpoint_descriptor->bmAttributes.xfer == TUSB_XFER_BULK)){
+                    puts("-> HCI ACL OUT");
+                }
+                break;
+            default:
+                break;
         }
+        p_desc += descriptor_len;
     }
-
-    return len;
 }
 
 //--------------------------------------------------------------------+
@@ -248,6 +265,7 @@ uint16_t count_interface_total_len(tusb_desc_interface_t const* desc_itf, uint8_
 //--------------------------------------------------------------------+
 
 void hid_report_received(tuh_xfer_t* xfer);
+void open_hid_interface(uint8_t daddr, tusb_desc_interface_t const *desc_itf, uint16_t max_len);
 
 void open_hid_interface(uint8_t daddr, tusb_desc_interface_t const *desc_itf, uint16_t max_len)
 {
